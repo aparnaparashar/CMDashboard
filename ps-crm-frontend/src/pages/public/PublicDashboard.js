@@ -1,0 +1,622 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { useLang, tx } from '../../context/LanguageContext';
+import { useAuth } from '../../context/AuthContext';
+import API from '../../api';
+import HeaderNavbar from '../../components/layout/HeaderNavbar';
+import ComplaintHeatmap from '../../components/ui/ComplaintHeatmap';
+import { WARD_ZONE_MAP } from '../../data/wardInfo';
+
+const COLORS = ['#FF9933', '#0F2557', '#138808'];
+
+export default function PublicDashboard() {
+  const navigate = useNavigate();
+  const { lang } = useLang();
+  const { user } = useAuth();
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [sortWard, setSortWard] = useState('count'); // 'count' | 'alpha'
+
+  useEffect(() => {
+    let intervalId;
+
+    const fetchStats = () => {
+      setLoading(true);
+      API.get('/dashboard/public')
+        .then(res => {
+          setStats(res.data.data);
+          setLastUpdated(new Date());
+          setLoading(false);
+        })
+        .catch(() => {
+          setLoading(false);
+        });
+    };
+
+    fetchStats();
+    intervalId = setInterval(fetchStats, 30000); // refresh every 30 seconds
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const resolutionRate = stats ? ((stats.resolved / (stats.total || 1)) * 100).toFixed(1) : 0;
+
+  // Build ward map from stats and include every ward from the official ward list
+  const wardMap = {};
+  stats?.byWard?.filter(w => w._id).forEach(w => { wardMap[w._id] = w.count; });
+
+  const wardData = Object.entries(WARD_ZONE_MAP)
+    .map(([ward, zone]) => ({ ward, zone, complaints: wardMap[ward] || 0 }))
+    .sort((a, b) => {
+      if (sortWard === 'count') {
+        const diff = b.complaints - a.complaints;
+        return diff !== 0 ? diff : a.ward.localeCompare(b.ward);
+      }
+      return a.ward.localeCompare(b.ward);
+    });
+
+  const activeWards  = wardData.filter(w => w.complaints > 0);
+  const maxCount     = Math.max(...wardData.map(w => w.complaints), 1);
+  const totalWardComplaints = wardData.reduce((s, w) => s + w.complaints, 0);
+
+  const trendData = stats?.dailyTrend
+    ? stats.dailyTrend.map(d => ({
+        month: d._id?.slice(5),
+        complaints: d.count,
+        resolved: Math.round(d.count * (parseFloat(resolutionRate) / 100)),
+      }))
+    : [];
+
+  const tabKeys   = ['overview', 'categories', 'wards', 'trends'];
+  const tabLabels = ['Overview', 'Categories', 'Wards', 'Trends'];
+
+  return (
+    <div style={styles.page}>
+      <HeaderNavbar activeTab="public" />
+
+      {/* Hero Banner */}
+      <div style={styles.heroBanner}>
+        <div style={styles.heroInner}>
+          <div>
+            <div style={styles.liveChip}>
+              <span style={styles.liveDot} />
+              {tx('LIVE DATA', lang)}
+            </div>
+            <h1 style={styles.heroTitle}>{tx('Public Grievance Transparency Report', lang)}</h1>
+            <p style={styles.heroSub}>
+              {tx('Real-time complaint statistics for citizen accountability and government transparency', lang)}
+            </p>
+          </div>
+          <div style={styles.platformPanel}>
+            <div style={styles.platformHeader}>
+              <span style={styles.platformDot} />
+              {tx('PLATFORM STATISTICS · LIVE', lang)}
+            </div>
+            {loading ? (
+              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, padding: '20px 0' }}> {tx('Loading...', lang)}</div>
+            ) : stats ? (
+              <>
+                <div style={styles.platformGrid}>
+                  {[
+                    { n: (stats.total || 0).toLocaleString(), l: tx('Complaints Tracked', lang) },
+                    { n: `${resolutionRate}%`,                 l: tx('Resolution Rate', lang) },
+                    { n: stats.resolved || 0,                  l: tx('Resolved', lang) },
+                    { n: stats.pending  || 0,                  l: tx('Pending', lang) },
+                  ].map((s, i) => (
+                    <div key={i} style={styles.platformStat}>
+                      <div style={styles.platformStatN}>{s.n}</div>
+                      <div style={styles.platformStatL}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={styles.platformChannelsLabel}>{tx('SUBMISSION CHANNELS', lang)}</div>
+                <div style={styles.platformChannels}>
+                  {[{ label: tx('Web', lang) }, { label: tx('App', lang) }, { label: 'WhatsApp' }, { label: 'SMS' }].map((ch, i) => (
+                    <div key={i} style={styles.channelChip}>
+                      <span style={styles.channelLabel}>{ch.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={styles.otpNote}>{tx(' OTP-verified login to file & manage complaints', lang)}</div>
+              </>
+            ) : (
+              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, padding: '20px 0' }}>
+                 {lang === 'hi' ? 'डेटा लोड नहीं हो सका' : 'Could not load data'}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={styles.container}>
+        {/* Sub-tab navigation */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, borderBottom: '1px solid #D8E2F0', paddingBottom: 12, flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {tabKeys.map((t, i) => (
+              <button key={t} onClick={() => setActiveTab(t)}
+                style={{
+                  ...styles.tabBtn,
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: 'none',
+                  background: activeTab === t ? '#0F2557' : 'transparent',
+                  color: activeTab === t ? '#fff' : '#6B7FA3',
+                  transition: 'all 0.2s',
+                }}>
+                {tx(tabLabels[i], lang)}
+              </button>
+            ))}
+          </div>
+          <span style={{ fontSize: 12, color: '#6B7FA3', fontWeight: 500 }}>
+            {tx('Last updated', lang)}: {lastUpdated ? lastUpdated.toLocaleString(lang === 'hi' ? 'hi-IN' : 'en-IN') : tx('Loading...', lang)}
+          </span>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 80, color: '#6B7FA3' }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}></div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{tx('Loading...', lang)}</div>
+          </div>
+        ) : !stats ? (
+          <div style={{ textAlign: 'center', padding: 80, color: '#6B7FA3' }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}></div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>
+              {lang === 'hi' ? 'बैकएंड से डेटा नहीं मिला।' : 'Could not fetch data. Make sure backend is running.'}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* ── Overview Tab ── */}
+            {activeTab === 'overview' && (
+              <>
+                <div style={styles.cardsRow}>
+                  {[
+                    { label: tx('Total Complaints', lang), value: stats.total,      color: '#FF9933', bg: '#FFEAA7', pct: 100 },
+                    { label: tx('Pending', lang),           value: stats.pending,    color: '#0F2557', bg: '#E3F2FD', pct: stats.total ? ((stats.pending    / stats.total) * 100).toFixed(0) : 0 },
+                    { label: tx('In Progress', lang),       value: stats.inProgress, color: '#138808', bg: '#E8F5E9', pct: stats.total ? ((stats.inProgress / stats.total) * 100).toFixed(0) : 0 },
+                    { label: tx('Resolved', lang),           value: stats.resolved,   color: '#FF9933', bg: '#FFEAA7', pct: stats.total ? ((stats.resolved   / stats.total) * 100).toFixed(0) : 0 },
+                  ].map((c, i) => (
+                    <div key={i} style={{ ...styles.statCard, borderTop: `4px solid ${c.color}` }}>
+                      <div style={{ ...styles.statValue, color: c.color }}>{c.value}</div>
+                      <div style={styles.statLabel}>{c.label}</div>
+                      <div style={{ fontSize: 12, color: c.color, fontWeight: 700, marginTop: 4 }}>{c.pct}% {tx('of total', lang)}</div>
+                      <div style={{ height: 4, background: c.bg, borderRadius: 2, marginTop: 12, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${c.pct}%`, background: c.color, borderRadius: 2 }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={styles.chartsRow}>
+                  <div style={styles.chartCard}>
+                    <div style={styles.chartTitle}>{tx(' Complaints by Category', lang)}</div>
+                    {stats.byCategory?.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <BarChart data={stats.byCategory} barSize={30}>
+                          <XAxis dataKey="_id" tick={{ fontSize: 12, fill: '#6B7FA3' }} />
+                          <YAxis tick={{ fontSize: 12, fill: '#6B7FA3' }} />
+                          <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 16px rgba(0,0,0,0.1)' }} />
+                          <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                            {stats.byCategory.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: 40, color: '#6B7FA3' }}>No data yet</div>
+                    )}
+                  </div>
+                  <div style={styles.chartCard}>
+                    <div style={styles.chartTitle}>{tx(' Resolution Status', lang)}</div>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <PieChart>
+                        <Pie data={[
+                          { name: tx('Resolved', lang),    value: stats.resolved   || 0 },
+                          { name: tx('In Progress', lang), value: stats.inProgress || 0 },
+                          { name: tx('Pending', lang),     value: stats.pending    || 0 },
+                        ]} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} innerRadius={55}
+                          label={({ name, percent }) => percent > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : ''}>
+                          {['#16A34A', '#2563EB', '#D97706'].map((c, i) => <Cell key={i} fill={c} />)}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <section style={{ marginTop: '32px' }}>
+                  <ComplaintHeatmap />
+                </section>
+                <div style={styles.accountCard}>
+                  <h2 style={styles.accountTitle}>{tx(' Government Accountability Metrics', lang)}</h2>
+                  <div style={styles.accountGrid}>
+                    {[
+                      { label: tx('Avg Resolution Time', lang), value: stats.avgResponse != null ? `${((stats.avgResponse || 0) / 24).toFixed(1)} days` : 'N/A', good: (stats.avgResponse || 0) / 24 <= 3 },
+                      { label: tx('SLA Compliance', lang),       value: `${resolutionRate}%`, good: parseFloat(resolutionRate) > 80 },
+                      { label: tx('Active Cases', lang),         value: stats.inProgress || 0, good: true },
+                      { label: tx('Monthly Growth', lang),       value: stats.monthlyGrowth != null ? `${stats.monthlyGrowth >= 0 ? '+' : ''}${stats.monthlyGrowth}%` : '0%', good: (stats.monthlyGrowth || 0) >= 0 },
+                      { label: tx('Citizen Satisfaction', lang), value: stats.citizenSatisfaction != null ? `${stats.citizenSatisfaction.toFixed(1)}/5` : 'N/A', good: (stats.citizenSatisfaction || 0) >= 3.5 },
+                      { label: tx('Escalation Rate', lang),      value: stats.escalatedRate != null ? `${stats.escalatedRate}%` : '0%', good: false },
+                    ].map((m, i) => (
+                      <div key={i} style={styles.metricCard}>
+                        <div style={{ ...styles.metricValue, color: '#103791' }}>{m.value}</div>
+                        <div style={styles.metricLabel}>{m.label}</div>
+                        <div style={{ marginTop: 12, padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: m.good ? '#DCFCE7' : '#FEE2E2', color: m.good ? '#16A34A' : '#DC2626', display: 'inline-block' }}>
+                          {m.good ? tx('Good', lang) : tx('Monitor', lang)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ── Categories Tab ── */}
+            {activeTab === 'categories' && (
+              <div>
+                <div style={styles.chartCardWide}>
+                  <div style={styles.chartTitle}>{tx(' Category-wise Breakdown', lang)}</div>
+                  {stats.byCategory?.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={stats.byCategory} barSize={40}>
+                        <XAxis dataKey="_id" tick={{ fontSize: 13, fill: '#6B7FA3' }} />
+                        <YAxis tick={{ fontSize: 13, fill: '#6B7FA3' }} />
+                        <Tooltip contentStyle={{ borderRadius: 8, border: 'none' }} />
+                        <Bar dataKey="count" radius={[8, 8, 0, 0]}>
+                          {stats.byCategory.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: 40, color: '#6B7FA3' }}>No category data yet</div>
+                  )}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginTop: 20 }}>
+                  {stats.byCategory?.map((c, i) => (
+                    <div key={i} style={{ background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 2px 8px rgba(15,37,87,0.06)', borderLeft: `4px solid ${COLORS[i % COLORS.length]}` }}>
+                      <div style={{ fontWeight: 700, color: '#0F2557', fontSize: 16, marginBottom: 8 }}>{tx(c._id, lang)}</div>
+                      <div style={{ fontSize: 32, fontWeight: 700, color: COLORS[i % COLORS.length] }}>{c.count}</div>
+                      <div style={{ fontSize: 13, color: '#6B7FA3', marginTop: 4 }}>
+                        {stats.total ? ((c.count / stats.total) * 100).toFixed(1) : 0}% {tx('of total', lang)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Wards Tab ── */}
+            {activeTab === 'wards' && (
+              <div>
+                {/* Summary Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+                  {[
+                    { label: 'Total Wards',      value: 250,                                                                       color: '#FF9933' },
+                    { label: 'Active Wards',     value: activeWards.length,                                                       color: '#0F2557' },
+                    { label: 'Highest Complaints', value: activeWards[0]?.ward || 'N/A',                                          color: '#138808' },
+                    { label: 'Total Ward Cases',  value: totalWardComplaints,                                                      color: '#FF9933' },
+                  ].map((s, i) => (
+                    <div key={i} style={{ ...styles.statCard, borderTop: `4px solid ${s.color}` }}>
+                      <div style={{ ...styles.statValue, color: s.color }}>{s.value}</div>
+                      <div style={styles.statLabel}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+
+                {/* Bar Chart */}
+                <div style={styles.chartCardWide}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <div style={styles.chartTitle}> Ward-wise Complaint Distribution</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {[['count', ' By Count'], ['alpha', ' A-Z']].map(([key, label]) => (
+                        <button key={key} onClick={() => setSortWard(key)}
+                          style={{ padding: '5px 12px', borderRadius: 6, border: '1.5px solid #D8E2F0', fontSize: 12, fontWeight: 600, cursor: 'pointer', background: sortWard === key ? '#0F2557' : '#fff', color: sortWard === key ? '#fff' : '#6B7FA3' }}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {activeWards.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={Math.max(300, activeWards.length * 40)}>
+                      <BarChart data={wardData.filter(w => w.complaints > 0)} layout="vertical" barSize={20}>
+                        <XAxis type="number" tick={{ fontSize: 12, fill: '#6B7FA3' }} />
+                        <YAxis dataKey="ward" type="category" tick={{ fontSize: 12, fill: '#6B7FA3' }} width={80} />
+                        <Tooltip contentStyle={{ borderRadius: 8, border: 'none' }} formatter={(v) => [`${v} complaints`, 'Count']} />
+                        <Bar dataKey="complaints" radius={[0, 6, 6, 0]}>
+                          {wardData.filter(w => w.complaints > 0).map((w, i) => {
+                            const intensity = w.complaints / maxCount;
+                            const color = intensity > 0.6 ? '#138808' : intensity > 0.3 ? '#0F2557' : '#FF9933';
+                            return <Cell key={i} fill={color} />;
+                          })}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: 60, color: '#6B7FA3' }}>
+                      <div style={{ fontSize: 40, marginBottom: 12 }}></div>
+                      <div style={{ fontWeight: 600, marginBottom: 8 }}>No ward data yet</div>
+                      <div style={{ fontSize: 13 }}>Submit complaints with a Ward selected to see data here</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Ward Cards Grid */}
+                {activeWards.length > 0 && (
+                  <div style={{ marginTop: 20 }}>
+                    <div style={styles.chartTitle}> Ward Details</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16, marginTop: 12 }}>
+                      {wardData.filter(w => w.complaints > 0).map((w, i) => {
+                        const intensity = w.complaints / maxCount;
+                        const color = intensity > 0.8 ? '#7F1D1D' : intensity > 0.6 ? '#EF4444' : intensity > 0.4 ? '#F59E0B' : '#0F2557';
+                        return (
+                          <div key={i} style={{ background: '#fff', borderRadius: 12, padding: 18, boxShadow: '0 2px 8px rgba(15,37,87,0.06)', borderTop: `4px solid ${color}` }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                              <div style={{ fontWeight: 700, color: '#0F2557', fontSize: 15 }}>{w.ward}</div>
+                              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 700, background: intensity > 0.6 ? '#FEE2E2' : intensity > 0.3 ? '#FEF3C7' : '#EEF2FF', color }}>
+                                {intensity > 0.6 ? ' High' : intensity > 0.3 ? ' Med' : ' Low'}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 28, fontWeight: 700, color, marginBottom: 4 }}>{w.complaints}</div>
+                            <div style={{ fontSize: 12, color: '#6B7FA3', marginBottom: 8 }}>complaints</div>
+                            <div style={{ fontSize: 12, color: '#9EB3CC' }}>
+                              {totalWardComplaints ? ((w.complaints / totalWardComplaints) * 100).toFixed(1) : 0}% of total
+                            </div>
+                            <div style={{ marginTop: 10, height: 5, background: '#F0F4FB', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${(w.complaints / maxCount) * 100}%`, background: color, borderRadius: 3 }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* All Wards Table */}
+                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 8px rgba(15,37,87,0.06)', marginTop: 24 }}>
+                  <div style={styles.chartTitle}> All Wards Summary Table</div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#F8FAFC' }}>
+                        {['Ward', 'Zone', 'Complaints', 'Share %', 'Activity Level', 'Progress'].map(h => (
+                          <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#6B7FA3', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {wardData.map((w, i) => {
+                        const intensity = w.complaints / maxCount;
+                        const color = intensity > 0.6 ? '#EF4444' : intensity > 0.3 ? '#F59E0B' : w.complaints > 0 ? '#0F2557' : '#D1D5DB';
+                        const level = intensity > 0.6 ? ' High' : intensity > 0.3 ? ' Medium' : w.complaints > 0 ? ' Low' : ' None';
+                        return (
+                          <tr key={i} style={{ borderBottom: '1px solid #F0F4FB' }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#FAFBFF'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                            <td style={{ padding: '12px 14px', fontWeight: 700, color: '#0F2557', fontSize: 13 }}>{w.ward}</td>
+                            <td style={{ padding: '12px 14px', fontSize: 13, color: '#6B7FA3' }}>{w.zone}</td>
+                            <td style={{ padding: '12px 14px', fontWeight: 700, color, fontSize: 15 }}>{w.complaints}</td>
+                            <td style={{ padding: '12px 14px', fontSize: 13, color: '#6B7FA3' }}>
+                              {totalWardComplaints ? ((w.complaints / totalWardComplaints) * 100).toFixed(1) : 0}%
+                            </td>
+                            <td style={{ padding: '12px 14px', fontSize: 12, fontWeight: 600 }}>{level}</td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ height: 6, background: '#F0F4FB', borderRadius: 3, width: 120, overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${(w.complaints / maxCount) * 100}%`, background: color, borderRadius: 3 }} />
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ── Trends Tab ── */}
+            {activeTab === 'trends' && (
+              <div>
+                <div style={styles.chartCardWide}>
+                  <div style={styles.chartTitle}>{tx(' Complaint Volume Trend', lang)}</div>
+                  {trendData.length > 0 ? (
+                    <>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <AreaChart data={trendData}>
+                          <defs>
+                            <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%"  stopColor="#0F2557" stopOpacity={0.15} />
+                              <stop offset="95%" stopColor="#0F2557" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#6B7FA3' }} />
+                          <YAxis tick={{ fontSize: 12, fill: '#6B7FA3' }} />
+                          <Tooltip contentStyle={{ borderRadius: 8, border: 'none' }} />
+                          <Area type="monotone" dataKey="complaints" stroke="#0F2557" strokeWidth={2} fill="url(#grad)" name={tx('Total Complaints', lang)} />
+                          <Area type="monotone" dataKey="resolved"   stroke="#16A34A" strokeWidth={2} fill="none" strokeDasharray="5 5" name={tx('Resolved', lang)} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                      <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ width: 16, height: 3, background: '#0F2557', borderRadius: 2 }} />
+                          <span style={{ fontSize: 12, color: '#6B7FA3' }}>{tx('Total Complaints', lang)}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ width: 16, height: 3, background: '#16A34A', borderRadius: 2 }} />
+                          <span style={{ fontSize: 12, color: '#6B7FA3' }}>{tx('Resolved', lang)}</span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: 60, color: '#6B7FA3' }}>
+                      {lang === 'hi' ? 'पिछले 7 दिनों में कोई डेटा नहीं है।' : 'No complaint data in the last 7 days.'}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* CTA Banner */}
+      <div style={styles.ctaBanner}>
+        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 20 }}>
+          <div>
+            <div style={{ fontFamily: "'Noto Serif',serif", fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+              {tx('Have a grievance? File it now - no login needed to track.', lang)}
+            </div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)' }}>
+              {tx('Join thousands of citizens who resolved their complaints through PS-CRM', lang)}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <button style={styles.ctaBtn}    onClick={() => navigate('/citizen/submit')}>{tx(' File a Complaint ', lang)}</button>
+            <button style={styles.ctaBtnSec} onClick={() => navigate('/citizen/track')} >{tx(' Track Complaint', lang)}</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <footer style={styles.footer}>
+        <div style={styles.footerTriColor}>
+          <div style={{ flex: 1, height: 4, background: '#FF9933' }} />
+          <div style={{ flex: 1, height: 4, background: '#FFF' }} />
+          <div style={{ flex: 1, height: 4, background: '#138808' }} />
+        </div>
+
+        <div style={styles.footerInner}>
+          <div style={styles.footerGrid}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <img src="/ashoka-emblem.png" alt="Emblem" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+                <div>
+                  <div style={styles.footerBrand}>PS-CRM <span style={{ color: '#FF9933' }}>Gov Portal</span></div>
+                  <div style={styles.footerBrandSub}>{lang === 'hi' ? 'स्मार्ट सार्वजनिक सेवा CRM' : 'Smart Public Service CRM'}</div>
+                </div>
+              </div>
+              <p style={styles.footerDesc}>
+                {lang === 'hi' ? 'प्रौद्योगिकी के माध्यम से नागरिकों और दिल्ली सरकार के बीच विश्वास बनाना।' : 'Building trust between citizens and Government of Delhi through technology.'}
+              </p>
+            </div>
+
+            <div>
+              <div style={styles.footerHeading}>{lang === 'hi' ? 'त्वरित लिंक' : 'Quick Links'}</div>
+              {[
+                { l: lang === 'hi' ? 'शिकायत दर्ज करें' : 'File Complaint',    p: '/citizen/submit' },
+                { l: lang === 'hi' ? 'शिकायत ट्रैक करें' : 'Track Status',      p: '/citizen/track' },
+                { l: lang === 'hi' ? 'मेरा डैशबोर्ड' : 'My Dashboard',      p: '/citizen/dashboard' },
+                { l: lang === 'hi' ? 'सार्वजनिक डैशबोर्ड' : 'Public Dashboard',  p: '/public' },
+                { l: lang === 'hi' ? 'सूचनाएं' : 'Notifications',     p: '/notifications' },
+              ].map(item => (
+                <div key={item.p} style={styles.footerLink} onClick={() => {
+                  if (item.p === '/citizen/submit' || item.p === '/citizen/dashboard' || item.p === '/notifications') {
+                    if (!user) navigate('/login');
+                    else navigate(item.p);
+                  } else {
+                    navigate(item.p);
+                  }
+                }}>{item.l}</div>
+              ))}
+            </div>
+
+            <div>
+              <div style={styles.footerHeading}>{lang === 'hi' ? 'कानूनी' : 'Legal & Compliance'}</div>
+              {[
+                'RTI - Right to Information',
+                'Citizen Charter',
+                'Accessibility Statement',
+                'Data Privacy Policy',
+                'Terms of Service',
+              ].map((item, i) => (
+                <div key={i} style={styles.footerLink}>{item}</div>
+              ))}
+            </div>
+
+            <div>
+              <div style={styles.footerHeading}>{lang === 'hi' ? 'संपर्क करें' : 'Contact Us'}</div>
+              <div style={styles.footerContact}>Email: grievance@pscrm.gov.in</div>
+              <div style={styles.footerContact}>Toll Free: 1800-111-555 ({lang === 'hi' ? 'निःशुल्क' : 'Toll Free'})</div>
+              <div style={styles.footerContact}>Address: {lang === 'hi' ? 'दिल्ली सचिवालय, आई.पी. एस्टेट' : 'Delhi Secretariat, I.P. Estate'}</div>
+              <div style={{ marginTop: 16 }}>
+                <div style={styles.footerHeading}>{lang === 'hi' ? 'सरकारी निकाय' : 'Government Bodies'}</div>
+                <div style={styles.footerContact}>{lang === 'hi' ? 'राष्ट्रीय सूचना विज्ञान केंद्र (NIC)' : 'National Informatics Centre (NIC)'}</div>
+                <div style={styles.footerContact}>{lang === 'hi' ? 'कार्मल मंत्रालय' : 'Ministry of Personnel & PG'}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={styles.footerBottom}>
+            <div>{lang === 'hi' ? '© 2026 दिल्ली राष्ट्रीय राजधानी क्षेत्र सरकार - स्मार्ट सार्वजनिक सेवा CRM। सर्वाधिकार सुरक्षित।' : '© 2026 Government of NCT of Delhi - Smart Public Service CRM. All rights reserved.'}</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
+              {lang === 'hi' ? 'राष्ट्रीय सूचना विज्ञान केंद्र (NIC) द्वारा डिज़ाइन एवं विकसित' : 'Designed & Developed by National Informatics Centre (NIC)'}
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+const styles = {
+  page:                { fontFamily: "'DM Sans',sans-serif", background: '#F4F6FB', minHeight: '100vh' },
+  topbar:              { background: '#0F2557', height: 34, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px', borderBottom: '3px solid #E8620A' },
+  header:              { background: '#fff', borderBottom: '1px solid #D8E2F0', height: 70, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px', boxShadow: '0 2px 12px rgba(15,37,87,0.08)', position: 'sticky', top: 0, zIndex: 200 },
+  brand:               { display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer' },
+  emblem:              { width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg,#0F2557,#1565C0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 },
+  brandMain:           { fontFamily: "'Noto Serif',serif", fontSize: 16, fontWeight: 700, color: '#0F2557' },
+  brandSub:            { fontSize: 11, color: '#6B7FA3', marginTop: 1 },
+  tabBtn:              { padding: '7px 16px', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', background: 'transparent', color: '#6B7FA3' },
+  tabBtnActive:        { background: '#EEF2FF', color: '#0F2557' },
+  btnOutline:          { padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: '1.5px solid #0F2557', color: '#0F2557', background: 'transparent' },
+  btnPrimary:          { padding: '9px 18px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: 'none', background: '#E8620A', color: '#fff' },
+  heroBanner:          { backgroundImage: "linear-gradient(135deg, rgba(15,37,87,0.85) 0%, rgba(26,58,110,0.6) 60%), url('/delhi-hero.png')", backgroundSize: 'cover', backgroundPosition: 'center', padding: '48px 40px', color: '#fff', borderBottom: '4px solid #FF9933' },
+  heroInner:           { maxWidth: 1100, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 40, flexWrap: 'wrap' },
+  liveChip:            { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', padding: '5px 14px', borderRadius: 100, fontSize: 11, color: 'rgba(255,255,255,0.85)', fontWeight: 700, letterSpacing: 1, marginBottom: 14 },
+  liveDot:             { width: 7, height: 7, borderRadius: '50%', background: '#4ade80', display: 'inline-block' },
+  heroTitle:           { fontFamily: "'Noto Serif',serif", fontSize: 32, fontWeight: 700, color: '#fff', marginBottom: 12 },
+  heroSub:             { fontSize: 15, color: 'rgba(255,255,255,0.65)', lineHeight: 1.7 },
+  platformPanel:       { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: 20, padding: '24px 22px', minWidth: 320, maxWidth: 380 },
+  platformHeader:      { fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: 'rgba(255,255,255,0.55)', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 7 },
+  platformDot:         { width: 7, height: 7, borderRadius: '50%', background: '#4ade80', display: 'inline-block', boxShadow: '0 0 6px #4ade80' },
+  platformGrid:        { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 },
+  platformStat:        { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '16px 14px' },
+  platformStatN:       { fontSize: 28, fontWeight: 700, color: '#fff', letterSpacing: '-0.5px', lineHeight: 1.1 },
+  platformStatL:       { fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 6, fontWeight: 500, letterSpacing: 0.2 },
+  platformChannelsLabel: { fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: 'rgba(255,255,255,0.45)', marginBottom: 12 },
+  platformChannels:    { display: 'flex', gap: 10, marginBottom: 14 },
+  channelChip:         { flex: 1, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '10px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 },
+  channelLabel:        { fontSize: 11, color: 'rgba(255,255,255,0.6)', fontWeight: 500 },
+  otpNote:             { background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '11px 14px', fontSize: 12, color: 'rgba(255,255,255,0.65)', textAlign: 'center', fontWeight: 500 },
+  container:           { maxWidth: 1100, margin: '0 auto', padding: '40px' },
+  cardsRow:            { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, marginBottom: 24 },
+  statCard:            { background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 2px 12px rgba(15,37,87,0.08)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 170, gap: 10, boxSizing: 'border-box' },
+  statValue:           { fontSize: 32, fontWeight: 700, marginBottom: 4, lineHeight: 1.05 },
+  statLabel:           { fontSize: 13, color: '#6B7FA3', textAlign: 'center', letterSpacing: 0.2 },
+  metricCard:          { background: '#F8FAFC', borderRadius: 12, padding: 22, textAlign: 'center', minHeight: 150, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10 },
+  metricValue:         { fontSize: 24, fontWeight: 700 },
+  metricLabel:         { fontSize: 12, color: '#6B7FA3', lineHeight: 1.5 },
+  chartsRow:           { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 },
+  chartCard:           { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 8px rgba(15,37,87,0.06)' },
+  chartCardWide:       { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 8px rgba(15,37,87,0.06)', marginBottom: 20 },
+  chartTitle:          { fontSize: 15, fontWeight: 700, color: '#0F2557', marginBottom: 16 },
+  accountCard:         { background: '#fff', borderRadius: 12, padding: 28, boxShadow: '0 2px 8px rgba(15,37,87,0.06)' },
+  accountTitle:        { fontFamily: "'Noto Serif',serif", fontSize: 20, fontWeight: 700, color: '#0F2557', marginBottom: 24 },
+  accountGrid:         { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20 },
+  ctaBanner:           { background: 'linear-gradient(135deg,#0F2557,#1565C0)', padding: '40px 40px' },
+  ctaBtn:              { padding: '12px 24px', borderRadius: 9, fontSize: 14, fontWeight: 700, cursor: 'pointer', border: 'none', background: '#E8620A', color: '#fff' },
+  ctaBtnSec:           { padding: '12px 24px', borderRadius: 9, fontSize: 14, fontWeight: 600, cursor: 'pointer', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1.5px solid rgba(255,255,255,0.3)' },
+  footer:              { background: '#0D1642' },
+  footerTriColor:      { display: 'flex' },
+  footerInner:         { maxWidth: 1240, margin: '0 auto', padding: '0 40px' },
+  footerGrid:          { display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1.2fr', gap: 36, padding: '44px 0 36px' },
+  footerBrand:         { fontFamily: "'Noto Serif', serif", fontSize: 17, fontWeight: 700, color: '#fff' },
+  footerBrandSub:      { fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
+  footerDesc:          { fontSize: 13, color: 'rgba(255,255,255,0.4)', lineHeight: 1.7 },
+  footerHeading:       { fontWeight: 700, color: '#fff', fontSize: 13, marginBottom: 14, letterSpacing: 0.5, textTransform: 'uppercase' },
+  footerLink:          { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 10, cursor: 'pointer', lineHeight: 1.4 },
+  footerContact:       { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 8, lineHeight: 1.4 },
+  footerBottom:        { borderTop: '1px solid rgba(255,255,255,0.08)', padding: '20px 0', textAlign: 'center', fontSize: 12, color: 'rgba(255,255,255,0.3)' },
+};
