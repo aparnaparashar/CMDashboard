@@ -4,6 +4,7 @@ const { sendComplaintConfirmation, sendStatusUpdate } = require('../config/email
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Groq = require('groq-sdk');
 const { validateComplaintFields } = require('../utils/sensitiveWords');
+const { geocodeComplaintLocation } = require('../services/locationService');
 
 const parseImages = (rawImages) => {
   if (!rawImages) return [];
@@ -186,6 +187,9 @@ const submitComplaint = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Ward is required' });
     }
     const deadline = setSLADeadline(urgency);
+    const locationPayload = { line1, line2, ward, locality, zone };
+    const coordinates = await geocodeComplaintLocation(locationPayload);
+    if (coordinates) locationPayload.coordinates = coordinates;
 
     // ── 1. Build dedup fingerprint ──────────────────────────────────────────
     const duplicateKey = Complaint.buildDuplicateKey(ward, locality, category);
@@ -233,6 +237,12 @@ const submitComplaint = async (req, res) => {
       if (URGENCY_RANK[urgency] > URGENCY_RANK[bestMatch.urgency]) {
         updateOps.$set = { urgency };
       }
+      if (coordinates && !bestMatch.location?.coordinates?.coordinates?.length) {
+        updateOps.$set = {
+          ...(updateOps.$set || {}),
+          'location.coordinates': coordinates,
+        };
+      }
 
       await Complaint.updateOne({ _id: bestMatch._id }, updateOps);
       const merged = await Complaint.findById(bestMatch._id);
@@ -260,7 +270,7 @@ const submitComplaint = async (req, res) => {
       urgency,
       duplicateKey,
       descriptionEmbedding: incomingEmbedding ?? undefined,
-      location: { line1, line2, ward, locality, zone },
+      location: locationPayload,
       filers: [{
         citizen: {
           name:  citizen.name  || '',
