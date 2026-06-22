@@ -32,6 +32,13 @@ export default function CMMobileView({ cmId, cmName }) {
     setLoading(false);
   };
 
+  const handleUploadPhotos = () => {
+    window.open('https://www.instagram.com/officialrekhagupta/?hl=en', '_blank', 'noreferrer');
+  };
+  const handleCheckIn = () => {
+    window.open('https://x.com/CMODelhi', '_blank', 'noreferrer');
+  };
+
   const getHeatmapColor = (intensity) => {
     if (intensity > 80) return '#DC2626'; // Red
     if (intensity > 60) return '#F59E0B'; // Orange
@@ -151,13 +158,13 @@ export default function CMMobileView({ cmId, cmName }) {
             <span style={styles.actionIcon}>◆</span>
             <span>View Nearby</span>
           </button>
-          <button style={styles.actionBtn}>
+          <button style={styles.actionBtn} onClick={handleUploadPhotos}>
             <span style={styles.actionIcon}>◇</span>
-            <span>Upload Photos</span>
+            <span>Post on Instagram</span>
           </button>
-          <button style={styles.actionBtn}>
+          <button style={styles.actionBtn} onClick={handleCheckIn}>
             <span style={styles.actionIcon}>●</span>
-            <span>Check In</span>
+            <span>Post on Twitter</span>
           </button>
           <button style={styles.actionBtn}>
             <span style={styles.actionIcon}>◉</span>
