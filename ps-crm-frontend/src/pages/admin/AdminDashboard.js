@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLang, tx } from '../../context/LanguageContext';
 import API from '../../api';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import HeaderNavbar from '../../components/layout/HeaderNavbar';
 import NearbyComplaints from './NearbyComplaints';
 import VisitLogs from './VisitLogs';
@@ -59,54 +59,28 @@ function FeedbackSection({ complaintId }) {
   );
 }
 
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
-  const navigate = useNavigate();
+  const navigate    = useNavigate();
   const { user, logout } = useAuth();
-  const { lang } = useLang();
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [cmLocation, setCmLocation] = useState(null);
-  const [viewMode, setViewMode] = useState('overview'); // overview, cm-mobile, officer-panel
+  const { lang }    = useLang();
+  const [stats, setStats]       = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [viewMode, setViewMode] = useState('overview');
 
-  // ── Track modal ──
-  const [trackModal, setTrackModal] = useState(null);
-  const [trackData, setTrackData]   = useState(null);
+  // ── Ref for NearbyComplaints — passed to CMMobileView for "View Nearby" scroll
+  const nearbyRef = useRef(null);
+
+  // ── Track modal ──────────────────────────────────────────────────────────
+  const [trackModal,   setTrackModal]   = useState(null);
+  const [trackData,    setTrackData]    = useState(null);
   const [trackLoading, setTrackLoading] = useState(false);
-  const [lightbox, setLightbox] = useState(null);
+  const [lightbox,     setLightbox]     = useState(null);
 
   useEffect(() => {
     API.get('/dashboard')
       .then(res => { setStats(res.data.data); setLoading(false); })
       .catch(() => setLoading(false));
-
-    // Get CM location for nearby complaints
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async position => {
-          const nextLocation = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            placeName: 'Current location',
-            ward: '',
-          };
-
-          try {
-            const params = new URLSearchParams({
-              lat: String(nextLocation.latitude),
-              lng: String(nextLocation.longitude),
-            });
-            const res = await API.get(`/location/reverse?${params.toString()}`);
-            nextLocation.placeName = res.data.data?.placeName || nextLocation.placeName;
-            nextLocation.ward = res.data.data?.ward || '';
-          } catch (error) {
-            console.warn('Reverse location lookup failed:', error.message);
-          }
-
-          setCmLocation(nextLocation);
-        },
-        () => console.log('Geolocation not available')
-      );
-    }
   }, []);
 
   const openTrack = async (c) => {
@@ -127,10 +101,10 @@ export default function AdminDashboard() {
   };
 
   const statusSteps = [
-    { key: 'Pending',     label: 'Submitted',   icon: '1' },
-    { key: 'In Progress', label: 'In Progress', icon: '2' },
-    { key: 'Resolved',    label: 'Resolved',    icon: '3' },
-    { key: 'Escalated',   label: 'Escalated',   icon: '4' },
+    { key: 'Pending',     label: 'Submitted'   },
+    { key: 'In Progress', label: 'In Progress' },
+    { key: 'Resolved',    label: 'Resolved'    },
+    { key: 'Escalated',   label: 'Escalated'   },
   ];
 
   const stepIndex = (status) => {
@@ -138,10 +112,23 @@ export default function AdminDashboard() {
     return ['Pending', 'In Progress', 'Resolved'].indexOf(status);
   };
 
-  const d = trackData || trackModal;
+  const d           = trackData || trackModal;
   const beforeImgs  = d?.images      || [];
   const afterImgs   = d?.afterImages || [];
   const currentStep = d ? stepIndex(d.status) : 0;
+
+  // ── "View Nearby" handler — switches to overview tab then scrolls ─────────
+  const handleViewNearby = () => {
+    if (viewMode !== 'overview') {
+      setViewMode('overview');
+      // Give React a tick to render the overview before scrolling
+      setTimeout(() => {
+        nearbyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+    } else {
+      nearbyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   return (
     <div style={styles.layout}>
@@ -154,45 +141,32 @@ export default function AdminDashboard() {
             <h1 style={styles.pageTitle}>{tx('Dashboard Overview', lang)} (CM + Team)</h1>
             <p style={styles.pageSub}>
               {new Date().toLocaleDateString(lang === 'hi' ? 'hi-IN' : 'en-IN', {
-                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
               })}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={styles.viewModeButtons}>
-              <button
-                onClick={() => setViewMode('overview')}
-                style={{
-                  ...styles.viewModeBtn,
-                  background: viewMode === 'overview' ? '#0F2557' : '#E8EEF8',
-                  color: viewMode === 'overview' ? '#fff' : '#0F2557',
-                }}
-              >
-                Overview
-              </button>
-              <button
-                onClick={() => setViewMode('cm-mobile')}
-                style={{
-                  ...styles.viewModeBtn,
-                  background: viewMode === 'cm-mobile' ? '#0F2557' : '#E8EEF8',
-                  color: viewMode === 'cm-mobile' ? '#fff' : '#0F2557',
-                }}
-              >
-                CM View
-              </button>
-              <button
-                onClick={() => setViewMode('officer-panel')}
-                style={{
-                  ...styles.viewModeBtn,
-                  background: viewMode === 'officer-panel' ? '#0F2557' : '#E8EEF8',
-                  color: viewMode === 'officer-panel' ? '#fff' : '#0F2557',
-                }}
-              >
-                Officers
-              </button>
+              {[
+                { key: 'overview',      label: 'Overview' },
+                { key: 'cm-mobile',     label: 'CM View'  },
+                { key: 'officer-panel', label: 'Officers' },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setViewMode(key)}
+                  style={{
+                    ...styles.viewModeBtn,
+                    background: viewMode === key ? '#0F2557' : '#E8EEF8',
+                    color:      viewMode === key ? '#fff'    : '#0F2557',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
             <button style={styles.btnRefresh} onClick={() => window.location.reload()}>
-              {tx(' Refresh', lang)}
+              {tx('Refresh', lang)}
             </button>
             <div style={styles.adminChip}>
               <div style={styles.chipAvatar}>{user?.name?.charAt(0)}</div>
@@ -203,34 +177,32 @@ export default function AdminDashboard() {
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: '80px', color: '#6B7FA3', fontSize: 16 }}>
-             {tx('Loading...', lang)}
+            {tx('Loading...', lang)}
           </div>
         ) : stats ? (
           <>
-            {/* VIEW MODE: OVERVIEW (Default) */}
+            {/* ── OVERVIEW ── */}
             {viewMode === 'overview' && (
               <>
-                {/* Nearby Complaints Section */}
-                {cmLocation && (
-                  <NearbyComplaints cmLocation={cmLocation} />
-                )}
+                {/* NearbyComplaints — wrapped in ref div so CMMobileView can scroll to it */}
+                <div ref={nearbyRef}>
+                  <NearbyComplaints />
+                </div>
 
-                {/* Overview Cards */}
+                {/* Stat Cards */}
                 <div style={{ ...styles.cards, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
                   {[
-                    { label: 'Total Complaints', value: stats.overview.total,      color: '#0F2557', icon: '◉' },
-                    { label: 'Pending',          value: stats.overview.pending,     color: '#0F2557', icon: '◐' },
-                    { label: 'In Progress',      value: stats.overview.inProgress,  color: '#0F2557', icon: '⟳' },
-                    { label: 'Resolved',         value: stats.overview.resolved,    color: '#0F2557', icon: '✓' },
-                    { label: 'Escalated',        value: stats.overview.escalated,   color: '#0F2557', icon: '▲' },
+                    { label: 'Total Complaints', value: stats.overview.total,      icon: '◉' },
+                    { label: 'Pending',          value: stats.overview.pending,     icon: '◐' },
+                    { label: 'In Progress',      value: stats.overview.inProgress,  icon: '⟳' },
+                    { label: 'Resolved',         value: stats.overview.resolved,    icon: '✓' },
+                    { label: 'Escalated',        value: stats.overview.escalated,   icon: '▲' },
                   ].map((item, i) => (
                     <div key={i} style={styles.card}>
-                      <div style={{ ...styles.cardIcon, background: item.color + '15', color: item.color }}>
-                        {item.icon}
-                      </div>
+                      <div style={{ ...styles.cardIcon, background: '#0F255715', color: '#0F2557' }}>{item.icon}</div>
                       <div style={styles.cardValue}>{item.value ?? 0}</div>
                       <div style={styles.cardLabel}>{item.label}</div>
-                      <div style={{ ...styles.cardBar, background: item.color }}></div>
+                      <div style={{ ...styles.cardBar, background: '#0F2557' }} />
                     </div>
                   ))}
                 </div>
@@ -250,14 +222,13 @@ export default function AdminDashboard() {
                       </ResponsiveContainer>
                     </div>
                   )}
-
                   {stats.statusDistribution && (
                     <div style={styles.chartCard}>
                       <div style={styles.chartTitle}>Status Distribution</div>
                       <ResponsiveContainer width="100%" height={250}>
                         <PieChart>
                           <Pie data={stats.statusDistribution} cx="50%" cy="50%" labelLine={false} label innerRadius={50} outerRadius={80} dataKey="value">
-                            {stats.statusDistribution.map((item, i) => (
+                            {stats.statusDistribution.map((_, i) => (
                               <Cell key={i} fill={COLORS[i % COLORS.length]} />
                             ))}
                           </Pie>
@@ -268,11 +239,10 @@ export default function AdminDashboard() {
                   )}
                 </div>
 
-                {/* Visit Logs Section */}
                 <VisitLogs cmId={user?._id} />
 
-                {/* Recent Complaints Table */}
-                {stats.recentComplaints && stats.recentComplaints.length > 0 && (
+                {/* Recent Complaints */}
+                {stats.recentComplaints?.length > 0 && (
                   <div style={styles.tableCard}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                       <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0F2557' }}>Recent Complaints</h3>
@@ -314,19 +284,24 @@ export default function AdminDashboard() {
               </>
             )}
 
-            {/* VIEW MODE: CM MOBILE */}
+            {/* ── CM MOBILE VIEW ── */}
             {viewMode === 'cm-mobile' && (
-              <CMMobileView cmId={user?._id} cmName={user?.name} />
+              <CMMobileView
+                cmId={user?._id}
+                cmName={user?.name}
+                nearbyRef={nearbyRef}
+                onViewNearby={handleViewNearby}
+              />
             )}
 
-            {/* VIEW MODE: OFFICER BANDWIDTH PANEL */}
+            {/* ── OFFICER PANEL ── */}
             {viewMode === 'officer-panel' && (
               <OfficerBandwidthPanel />
             )}
           </>
         ) : null}
 
-        {/* Track Modal */}
+        {/* ── Track Modal ── */}
         {trackModal && (
           <div style={modal.overlay} onClick={() => { setTrackModal(null); setLightbox(null); }}>
             <div style={modal.box} onClick={e => e.stopPropagation()}>
@@ -348,21 +323,23 @@ export default function AdminDashboard() {
                       <div style={modal.sectionTitle}>PROGRESS TIMELINE</div>
                       <div style={modal.timeline}>
                         {statusSteps.map((step, i) => (
-                          <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
-                            <div style={{
-                              width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              background: i <= currentStep ? '#0F2557' : '#E8EEF8', color: i <= currentStep ? '#fff' : '#9EB3CC',
-                              fontWeight: 700, fontSize: 12,
-                            }}>
-                              {i + 1}
-                            </div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: i <= currentStep ? '#0F2557' : '#9EB3CC', marginLeft: 12, marginRight: 12 }}>
-                              {step.label}
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', flex: i < statusSteps.length - 1 ? 1 : 'none' }}>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{
+                                width: 32, height: 32, borderRadius: '50%',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                background: i <= currentStep ? '#0F2557' : '#E8EEF8',
+                                color: i <= currentStep ? '#fff' : '#9EB3CC',
+                                fontWeight: 700, fontSize: 12,
+                              }}>
+                                {i + 1}
+                              </div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: i <= currentStep ? '#0F2557' : '#9EB3CC', marginTop: 4, whiteSpace: 'nowrap' }}>
+                                {step.label}
+                              </div>
                             </div>
                             {i < statusSteps.length - 1 && (
-                              <div style={{
-                                height: 2, flex: 1, background: i < currentStep ? '#0F2557' : '#E8EEF8',
-                              }}></div>
+                              <div style={{ flex: 1, height: 2, background: i < currentStep ? '#0F2557' : '#E8EEF8', margin: '0 8px', marginBottom: 16 }} />
                             )}
                           </div>
                         ))}
@@ -389,7 +366,6 @@ export default function AdminDashboard() {
                         ))}
                       </div>
 
-                      {/* Description */}
                       {d?.description && (
                         <div style={{ marginTop: 12, padding: '12px 16px', background: '#F8FAFC', borderRadius: 8, border: '1px solid #E8EEF8' }}>
                           <div style={{ fontSize: 12, fontWeight: 700, color: '#6B7FA3', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>DESCRIPTION</div>
@@ -397,7 +373,6 @@ export default function AdminDashboard() {
                         </div>
                       )}
 
-                      {/* Resolution Note */}
                       {d?.resolution && (
                         <div style={{ marginTop: 12, padding: '12px 16px', background: '#F0FDF4', borderRadius: 8, borderLeft: '3px solid #16A34A' }}>
                           <div style={{ fontSize: 12, fontWeight: 700, color: '#16A34A', marginBottom: 4 }}>RESOLUTION NOTE</div>
@@ -405,7 +380,6 @@ export default function AdminDashboard() {
                         </div>
                       )}
 
-                      {/* Citizen Feedback */}
                       {d?.status === 'Resolved' && d?._id && (
                         <FeedbackSection complaintId={d._id} />
                       )}
@@ -415,49 +389,31 @@ export default function AdminDashboard() {
                     <div style={modal.section}>
                       <div style={modal.sectionTitle}>BEFORE & AFTER PHOTOS</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-
-                        <div>
-                          <div style={modal.photoHeader}>
-                            <span style={{ ...modal.photoBadge, background: '#FEE2E2', color: '#DC2626' }}>BEFORE</span>
-                            <span style={modal.photoCount}>{beforeImgs.length} photo(s) · by citizen</span>
+                        {[
+                          { label: 'BEFORE', imgs: beforeImgs, badgeBg: '#FEE2E2', badgeColor: '#DC2626', emptyMsg: 'No photos uploaded by citizen' },
+                          { label: 'AFTER',  imgs: afterImgs,  badgeBg: '#DCFCE7', badgeColor: '#16A34A', emptyMsg: d?.status === 'Resolved' ? 'Officer did not upload after photos' : 'Complaint not yet resolved' },
+                        ].map(({ label, imgs, badgeBg, badgeColor, emptyMsg }) => (
+                          <div key={label}>
+                            <div style={modal.photoHeader}>
+                              <span style={{ ...modal.photoBadge, background: badgeBg, color: badgeColor }}>{label}</span>
+                              <span style={modal.photoCount}>{imgs.length} photo(s)</span>
+                            </div>
+                            {imgs.length === 0 ? (
+                              <div style={modal.emptyPhotos}>{emptyMsg}</div>
+                            ) : (
+                              <div style={modal.photoGrid}>
+                                {imgs.map((img, i) => (
+                                  <img key={i} src={imgSrc(img)} alt={`${label}-${i}`}
+                                    style={modal.photoThumb}
+                                    onClick={() => setLightbox(imgSrc(img))}
+                                    onError={e => e.target.style.display = 'none'} />
+                                ))}
+                              </div>
+                            )}
                           </div>
-                          {beforeImgs.length === 0 ? (
-                            <div style={modal.emptyPhotos}>No photos uploaded by citizen</div>
-                          ) : (
-                            <div style={modal.photoGrid}>
-                              {beforeImgs.map((img, i) => (
-                                <img key={i} src={imgSrc(img)} alt={`before-${i}`}
-                                  style={modal.photoThumb}
-                                  onClick={() => setLightbox(imgSrc(img))}
-                                  onError={e => e.target.style.display = 'none'} />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <div style={modal.photoHeader}>
-                            <span style={{ ...modal.photoBadge, background: '#DCFCE7', color: '#16A34A' }}>AFTER</span>
-                            <span style={modal.photoCount}>{afterImgs.length} photo(s) · by officer</span>
-                          </div>
-                          {afterImgs.length === 0 ? (
-                            <div style={modal.emptyPhotos}>
-                              {d?.status === 'Resolved' ? 'Officer did not upload after photos' : 'Complaint not yet resolved'}
-                            </div>
-                          ) : (
-                            <div style={modal.photoGrid}>
-                              {afterImgs.map((img, i) => (
-                                <img key={i} src={imgSrc(img)} alt={`after-${i}`}
-                                  style={modal.photoThumb}
-                                  onClick={() => setLightbox(imgSrc(img))}
-                                  onError={e => e.target.style.display = 'none'} />
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                        ))}
                       </div>
                     </div>
-
                   </>
                 )}
               </div>
@@ -479,6 +435,7 @@ export default function AdminDashboard() {
   );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
 const modal = {
   overlay:      { position: 'fixed', inset: 0, background: 'rgba(15,37,87,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 },
   box:          { background: '#fff', borderRadius: 16, width: '100%', maxWidth: 780, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 80px rgba(15,37,87,0.25)' },
@@ -503,28 +460,28 @@ const modal = {
 };
 
 const styles = {
-  layout:      { background: '#F4F6FB', minHeight: '100vh', fontFamily: "'DM Sans',sans-serif" },
-  main:        { maxWidth: 1240, margin: '0 auto', padding: '40px 40px 60px', background: '#F4F6FB', minHeight: 'calc(100vh - 150px)', boxSizing: 'border-box' },
-  topbar:      { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28, paddingBottom: 20, borderBottom: '1px solid #E8EEF8', flexWrap: 'wrap', gap: 12 },
-  pageTitle:   { fontFamily: "'Noto Serif',serif", fontSize: 24, fontWeight: 700, color: '#0F2557' },
-  pageSub:     { color: '#6B7FA3', fontSize: 13, marginTop: 4 },
+  layout:          { background: '#F4F6FB', minHeight: '100vh', fontFamily: "'DM Sans',sans-serif" },
+  main:            { maxWidth: 1240, margin: '0 auto', padding: '40px 40px 60px', background: '#F4F6FB', minHeight: 'calc(100vh - 150px)', boxSizing: 'border-box' },
+  topbar:          { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28, paddingBottom: 20, borderBottom: '1px solid #E8EEF8', flexWrap: 'wrap', gap: 12 },
+  pageTitle:       { fontFamily: "'Noto Serif',serif", fontSize: 24, fontWeight: 700, color: '#0F2557' },
+  pageSub:         { color: '#6B7FA3', fontSize: 13, marginTop: 4 },
   viewModeButtons: { display: 'flex', gap: 8 },
-  viewModeBtn: { padding: '8px 14px', border: '1.5px solid #D8E2F0', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.3s ease' },
-  btnRefresh:  { padding: '8px 16px', border: '1.5px solid #D8E2F0', borderRadius: 8, background: '#fff', color: '#0F2557', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  adminChip:   { display: 'flex', alignItems: 'center', gap: 8, background: '#fff', padding: '6px 14px', borderRadius: 20, boxShadow: '0 2px 8px rgba(15,37,87,0.08)' },
-  chipAvatar:  { width: 28, height: 28, borderRadius: '50%', background: '#0F2557', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 },
-  cards:       { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 20, marginBottom: 24 },
-  card:        { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 8px rgba(15,37,87,0.06)', minHeight: 170, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' },
-  cardIcon:    { width: 44, height: 44, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, marginBottom: 12 },
-  cardValue:   { fontSize: 32, fontWeight: 700, marginBottom: 4 },
-  cardLabel:   { fontSize: 13, color: '#6B7FA3', marginBottom: 12 },
-  cardBar:     { height: 6, borderRadius: 4, overflow: 'hidden', marginTop: 'auto' },
-  chartsRow:   { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 },
-  chartCard:   { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 8px rgba(15,37,87,0.06)' },
-  chartTitle:  { fontSize: 15, fontWeight: 700, color: '#0F2557', marginBottom: 16 },
-  tableCard:   { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 8px rgba(15,37,87,0.06)' },
-  th:          { padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: '#6B7FA3', textTransform: 'uppercase', letterSpacing: 0.5 },
-  td:          { padding: '12px 16px', fontSize: 14, color: '#3A4E70' },
-  viewAllBtn:  { padding: '6px 14px', border: '1.5px solid #D8E2F0', borderRadius: 8, background: 'transparent', color: '#0F2557', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  btnTrack:    { padding: '6px 14px', border: '1.5px solid #0F2557', borderRadius: 6, background: '#EEF2FF', color: '#0F2557', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' },
+  viewModeBtn:     { padding: '8px 14px', border: '1.5px solid #D8E2F0', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' },
+  btnRefresh:      { padding: '8px 16px', border: '1.5px solid #D8E2F0', borderRadius: 8, background: '#fff', color: '#0F2557', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  adminChip:       { display: 'flex', alignItems: 'center', gap: 8, background: '#fff', padding: '6px 14px', borderRadius: 20, boxShadow: '0 2px 8px rgba(15,37,87,0.08)' },
+  chipAvatar:      { width: 28, height: 28, borderRadius: '50%', background: '#0F2557', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 },
+  cards:           { display: 'grid', gap: 20, marginBottom: 24 },
+  card:            { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 8px rgba(15,37,87,0.06)', minHeight: 170, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' },
+  cardIcon:        { width: 44, height: 44, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, marginBottom: 12 },
+  cardValue:       { fontSize: 32, fontWeight: 700, marginBottom: 4 },
+  cardLabel:       { fontSize: 13, color: '#6B7FA3', marginBottom: 12 },
+  cardBar:         { height: 6, borderRadius: 4, overflow: 'hidden', marginTop: 'auto' },
+  chartsRow:       { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 },
+  chartCard:       { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 8px rgba(15,37,87,0.06)' },
+  chartTitle:      { fontSize: 15, fontWeight: 700, color: '#0F2557', marginBottom: 16 },
+  tableCard:       { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 8px rgba(15,37,87,0.06)' },
+  th:              { padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: '#6B7FA3', textTransform: 'uppercase', letterSpacing: 0.5 },
+  td:              { padding: '12px 16px', fontSize: 14, color: '#3A4E70' },
+  viewAllBtn:      { padding: '6px 14px', border: '1.5px solid #D8E2F0', borderRadius: 8, background: 'transparent', color: '#0F2557', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  btnTrack:        { padding: '6px 14px', border: '1.5px solid #0F2557', borderRadius: 6, background: '#EEF2FF', color: '#0F2557', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' },
 };

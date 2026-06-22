@@ -1,193 +1,228 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import API from '../../api';
 
-export default function CMMobileView({ cmId, cmName }) {
-  const [mobileStats, setMobileStats] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [liveHeatmapData, setLiveHeatmapData] = useState([]);
-  const [alertCount, setAlertCount] = useState(0);
+export default function CMMobileView({ cmId, cmName, nearbyRef, onViewNearby }) {
+  const [complaints,    setComplaints]    = useState([]);
+  const [loading,       setLoading]       = useState(false);
+  const [heatmapData,   setHeatmapData]   = useState([]);
+  const [alertCount,    setAlertCount]    = useState(0);
+  const [stats,         setStats]         = useState({ today: 0, completed: 0, pending: 0 });
 
-  useEffect(() => {
-    fetchMobileStats();
-    const interval = setInterval(fetchMobileStats, 30000); // Refresh every 30s
-    return () => clearInterval(interval);
-  }, [cmId]);
-
-  const fetchMobileStats = async () => {
+  // ── Fetch all complaints and derive everything from them ──────────────────
+  const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await API.get(`/cm-mobile-stats?cmId=${cmId}`);
-      setMobileStats(res.data.data);
-      
-      // Count critical/escalated complaints as alerts
-      const alerts = res.data.data?.escalatedComplaints?.length || 0;
-      setAlertCount(alerts);
-      
-      // Fetch heatmap data
-      const heatRes = await API.get(`/heatmap?cmId=${cmId}`);
-      setLiveHeatmapData(heatRes.data.data || []);
+      const res  = await API.get('/complaints');
+      const data = res.data.data || [];
+      setComplaints(data);
+
+      // ── Stats ──────────────────────────────────────────────────────────
+      const today     = new Date().toDateString();
+      const todayList = data.filter(c => new Date(c.createdAt).toDateString() === today);
+      const completed = todayList.filter(c => c.status === 'Resolved').length;
+      const pending   = data.filter(c => c.status === 'Pending' || c.status === 'In Progress').length;
+      setStats({ today: todayList.length, completed, pending });
+
+      // ── Alert count (escalated) ────────────────────────────────────────
+      setAlertCount(data.filter(c => c.status === 'Escalated').length);
+
+      // ── Build heatmap: group active complaints by ward ─────────────────
+      const wardMap = {};
+      data
+        .filter(c => c.status !== 'Resolved')
+        .forEach(c => {
+          const ward = c.location?.ward || 'Unknown';
+          wardMap[ward] = (wardMap[ward] || 0) + 1;
+        });
+
+      const maxCount = Math.max(...Object.values(wardMap), 1);
+      const cells = Object.entries(wardMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12)
+        .map(([ward, count]) => ({
+          area:          ward,
+          complaintCount: count,
+          intensity:     Math.round((count / maxCount) * 100),
+        }));
+
+      setHeatmapData(cells);
     } catch (err) {
-      console.error('Error fetching mobile stats:', err);
+      console.error('Error fetching complaints:', err);
     }
     setLoading(false);
   };
 
-  const handleUploadPhotos = () => {
-    window.open('https://www.instagram.com/officialrekhagupta/?hl=en', '_blank', 'noreferrer');
-  };
-  const handleCheckIn = () => {
-    window.open('https://x.com/CMODelhi', '_blank', 'noreferrer');
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, [cmId]);
+
+  // ── Heatmap colour ────────────────────────────────────────────────────────
+  const heatColor = (intensity) => {
+    if (intensity > 80) return { bg: '#FEE2E2', text: '#DC2626', dot: '#DC2626' };
+    if (intensity > 60) return { bg: '#FEF3C7', text: '#D97706', dot: '#F59E0B' };
+    if (intensity > 40) return { bg: '#FEF9C3', text: '#CA8A04', dot: '#FCD34D' };
+    return { bg: '#F1F5F9', text: '#475569', dot: '#CBD5E1' };
   };
 
-  const getHeatmapColor = (intensity) => {
-    if (intensity > 80) return '#DC2626'; // Red
-    if (intensity > 60) return '#F59E0B'; // Orange
-    if (intensity > 40) return '#FCD34D'; // Yellow
-    return '#D1D5DB'; // Gray
+  // ── Scroll to nearby complaints section ──────────────────────────────────
+  const handleViewNearby = () => {if (onViewNearby) { onViewNearby(); return; }
+    if (nearbyRef?.current) {
+      nearbyRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
+
+  const escalatedList = complaints.filter(c => c.status === 'Escalated');
+  const completionRate = stats.today > 0 ? Math.round((stats.completed / stats.today) * 100) : 0;
 
   return (
-    <div style={styles.mobileContainer}>
-      {/* Red Alert Banner */}
+    <div style={s.container}>
+
+      {/* Alert Banner */}
       {alertCount > 0 && (
-        <div style={styles.alertBanner}>
-          <span style={styles.alertIcon}>!</span>
+        <div style={s.alertBanner}>
+          <div style={s.alertDot} />
           <div>
-            <div style={styles.alertTitle}>
-              ▲ {alertCount} Escalated Complaint{alertCount > 1 ? 's' : ''}
-            </div>
-            <div style={styles.alertMessage}>
-              Immediate action required - Check your dashboard
-            </div>
+            <div style={s.alertTitle}>{alertCount} Escalated Complaint{alertCount > 1 ? 's' : ''}</div>
+            <div style={s.alertMsg}>Immediate action required</div>
           </div>
         </div>
       )}
 
       {/* CM Header */}
-      <div style={styles.cmHeader}>
-        <div style={styles.cmInfo}>
-          <div style={styles.cmAvatar}>{cmName?.charAt(0)?.toUpperCase() || 'CM'}</div>
+      <div style={s.cmHeader}>
+        <div style={s.cmInfo}>
+          <div style={s.cmAvatar}>{cmName?.charAt(0)?.toUpperCase() || 'C'}</div>
           <div>
-            <div style={styles.cmName}>{cmName || 'CM Officer'}</div>
-            <div style={styles.cmStatus}>Active on Field</div>
+            <div style={s.cmName}>{cmName || 'CM Officer'}</div>
+            <div style={s.cmStatus}>Active on Field</div>
           </div>
         </div>
-        <button style={styles.refreshBtn} onClick={fetchMobileStats}>
-          ⟳
+        <button style={s.refreshBtn} onClick={fetchData} disabled={loading}>
+          {loading ? '...' : 'Refresh'}
         </button>
       </div>
 
-      {/* 3-Stat Summary */}
-      {mobileStats && (
-        <div style={styles.statsSummary}>
-          <div style={styles.statBox}>
-            <div style={styles.statNumber}>{mobileStats.todayComplaints || 0}</div>
-            <div style={styles.statLabel}>Today's Complaints</div>
-            <div style={styles.statSubtext}>In your area</div>
+      {/* Stats */}
+      <div style={s.statsRow}>
+        {[
+          { value: stats.today,     label: "Today's Complaints", sub: 'In your area' },
+          { value: stats.completed, label: 'Completed Today',    sub: `${completionRate}% rate` },
+          { value: stats.pending,   label: 'Pending Actions',    sub: 'Needs attention' },
+        ].map((stat, i) => (
+          <div key={i} style={s.statBox}>
+            <div style={s.statNum}>{stat.value}</div>
+            <div style={s.statLabel}>{stat.label}</div>
+            <div style={s.statSub}>{stat.sub}</div>
           </div>
-          
-          <div style={styles.statBox}>
-            <div style={styles.statNumber}>{mobileStats.completedToday || 0}</div>
-            <div style={styles.statLabel}>Completed Today</div>
-            <div style={styles.statSubtext}>{mobileStats.completionRate || 0}% rate</div>
-          </div>
-          
-          <div style={styles.statBox}>
-            <div style={styles.statNumber}>{mobileStats.pendingComplaints || 0}</div>
-            <div style={styles.statLabel}>Pending Actions</div>
-            <div style={styles.statSubtext}>Urgent items</div>
-          </div>
-        </div>
-      )}
+        ))}
+      </div>
 
       {/* Live Heatmap */}
-      <div style={styles.heatmapContainer}>
-        <div style={styles.heatmapHeader}>
-          <h3 style={styles.heatmapTitle}>◆ LIVE HEATMAP - Active Complaints</h3>
-          <span style={styles.heatmapLegend}>
-            More complaints = Hotter color
-          </span>
+      <div style={s.section}>
+        <div style={s.sectionHead}>
+          <div style={s.sectionTitle}>Live Heatmap — Active Complaints by Ward</div>
+          <div style={s.sectionSub}>Grouped from registered complaints</div>
         </div>
 
-        {liveHeatmapData.length === 0 ? (
-          <div style={styles.emptyHeatmap}>No heatmap data available</div>
+        {heatmapData.length === 0 ? (
+          <div style={s.emptyState}>
+            {loading ? 'Loading complaint data...' : 'No active complaints to display'}
+          </div>
         ) : (
-          <div style={styles.heatmapGrid}>
-            {liveHeatmapData.map((cell, idx) => (
-              <div
-                key={idx}
-                style={{
-                  ...styles.heatmapCell,
-                  background: getHeatmapColor(cell.intensity),
-                  border: cell.intensity > 60 ? '2px solid #8B5CF6' : 'none',
-                }}
-                title={`${cell.area}: ${cell.complaintCount} complaints`}
-              >
-                <div style={styles.cellLabel}>{cell.area}</div>
-                <div style={styles.cellCount}>{cell.complaintCount}</div>
-              </div>
-            ))}
-          </div>
-        )}
+          <>
+            <div style={s.heatGrid}>
+              {heatmapData.map((cell, i) => {
+                const col = heatColor(cell.intensity);
+                return (
+                  <div key={i} style={{ ...s.heatCell, background: col.bg }}>
+                    <div style={{ ...s.heatDot, background: col.dot }} />
+                    <div style={s.heatWard}>{cell.area}</div>
+                    <div style={{ ...s.heatCount, color: col.text }}>{cell.complaintCount}</div>
+                    <div style={s.heatSub}>complaint{cell.complaintCount !== 1 ? 's' : ''}</div>
+                  </div>
+                );
+              })}
+            </div>
 
-        <div style={styles.heatmapLegendBox}>
-          <div style={styles.legendItem}>
-            <div style={{ ...styles.legendColor, background: '#DC2626' }}></div>
-            <span>Critical (80+)</span>
-          </div>
-          <div style={styles.legendItem}>
-            <div style={{ ...styles.legendColor, background: '#F59E0B' }}></div>
-            <span>High (60-79)</span>
-          </div>
-          <div style={styles.legendItem}>
-            <div style={{ ...styles.legendColor, background: '#FCD34D' }}></div>
-            <span>Medium (40-59)</span>
-          </div>
-          <div style={styles.legendItem}>
-            <div style={{ ...styles.legendColor, background: '#D1D5DB' }}></div>
-            <span>Low</span>
-          </div>
-        </div>
+            <div style={s.legendRow}>
+              {[
+                { dot: '#DC2626', label: 'Critical (80+)' },
+                { dot: '#F59E0B', label: 'High (60–79)' },
+                { dot: '#FCD34D', label: 'Medium (40–59)' },
+                { dot: '#CBD5E1', label: 'Low' },
+              ].map((l, i) => (
+                <div key={i} style={s.legendItem}>
+                  <div style={{ ...s.legendDot, background: l.dot }} />
+                  <span>{l.label}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Quick Actions */}
-      <div style={styles.quickActionsContainer}>
-        <h3 style={styles.actionTitle}>Quick Actions</h3>
-        <div style={styles.actionButtons}>
-          <button style={styles.actionBtn}>
-            <span style={styles.actionIcon}>◆</span>
-            <span>View Nearby</span>
+      <div style={s.section}>
+        <div style={s.sectionTitle}>Quick Actions</div>
+        <div style={s.actionsGrid}>
+          <button style={s.actionBtn} onClick={handleViewNearby}>
+            <div style={s.actionIconBox}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0F2557" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+              </svg>
+            </div>
+            <span style={s.actionLabel}>View Nearby</span>
           </button>
-          <button style={styles.actionBtn} onClick={handleUploadPhotos}>
-            <span style={styles.actionIcon}>◇</span>
-            <span>Post on Instagram</span>
+
+          <button style={s.actionBtn} onClick={() => window.open('https://www.instagram.com', '_blank', 'noreferrer')}>
+            <div style={s.actionIconBox}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0F2557" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="0.5" fill="#0F2557"/>
+              </svg>
+            </div>
+            <span style={s.actionLabel}>Post on Instagram</span>
           </button>
-          <button style={styles.actionBtn} onClick={handleCheckIn}>
-            <span style={styles.actionIcon}>●</span>
-            <span>Post on Twitter</span>
+
+          <button style={s.actionBtn} onClick={() => window.open('https://x.com', '_blank', 'noreferrer')}>
+            <div style={s.actionIconBox}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="#0F2557">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.738l7.73-8.835L1.254 2.25H8.08l4.261 5.636 5.903-5.636zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+              </svg>
+            </div>
+            <span style={s.actionLabel}>Post on X</span>
           </button>
-          <button style={styles.actionBtn}>
-            <span style={styles.actionIcon}>◉</span>
-            <span>Send Update</span>
+
+          <button style={s.actionBtn}>
+            <div style={s.actionIconBox}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0F2557" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 19-7z"/>
+              </svg>
+            </div>
+            <span style={s.actionLabel}>Send Update</span>
           </button>
         </div>
       </div>
 
-      {/* Escalated Complaints List */}
-      {mobileStats?.escalatedComplaints?.length > 0 && (
-        <div style={styles.escalatedSection}>
-          <h3 style={styles.sectionTitle}>▲ ESCALATED COMPLAINTS</h3>
-          {mobileStats.escalatedComplaints.map((complaint, idx) => (
-            <div key={idx} style={styles.escalatedCard}>
-              <div style={styles.escalatedHeader}>
-                <span style={styles.escalatedType}>{complaint.complaintType}</span>
-                <span style={styles.escalatedPriority}>HIGH</span>
+      {/* Escalated Complaints */}
+      {escalatedList.length > 0 && (
+        <div style={s.escalatedSection}>
+          <div style={s.escalatedTitle}>Escalated Complaints</div>
+          {escalatedList.map((c, i) => (
+            <div key={i} style={s.escalatedCard}>
+              <div style={s.escalatedTop}>
+                <span style={s.escalatedType}>{c.complaintType || c.title || 'Complaint'}</span>
+                <span style={s.escalatedBadge}>HIGH</span>
               </div>
-              <div style={styles.escalatedDetails}>
-                {complaint.citizen?.name} • {complaint.citizen?.phone}
+              <div style={s.escalatedMeta}>
+                {c.citizen?.name}{c.citizen?.phone ? ` · ${c.citizen.phone}` : ''}
               </div>
-              <div style={styles.escalatedDate}>
-                Escalated: {new Date(complaint.escalatedAt).toLocaleDateString()}
+              {c.location?.ward && (
+                <div style={s.escalatedWard}>{c.location.ward}</div>
+              )}
+              <div style={s.escalatedDate}>
+                {new Date(c.createdAt).toLocaleDateString('en-IN')}
               </div>
             </div>
           ))}
@@ -197,250 +232,213 @@ export default function CMMobileView({ cmId, cmName }) {
   );
 }
 
-const styles = {
-  mobileContainer: {
+// ── Styles ────────────────────────────────────────────────────────────────────
+const s = {
+  container: {
     background: '#F4F6FB',
-    borderRadius: 12,
+    borderRadius: 14,
     overflow: 'hidden',
-    boxShadow: '0 4px 16px rgba(15,37,87,0.1)',
-    maxWidth: 500,
+    boxShadow: '0 4px 20px rgba(15,37,87,0.1)',
+    maxWidth: 520,
     margin: '0 auto',
+    fontFamily: "'Inter', system-ui, sans-serif",
   },
+
+  // Alert
   alertBanner: {
-    background: 'linear-gradient(135deg, #DC2626 0%, #8B5CF6 100%)',
+    background: '#DC2626',
     color: '#fff',
-    padding: 16,
+    padding: '12px 16px',
     display: 'flex',
-    gap: 12,
-    alignItems: 'flex-start',
+    gap: 10,
+    alignItems: 'center',
   },
-  alertIcon: {
-    fontSize: 24,
+  alertDot: {
+    width: 10, height: 10,
+    borderRadius: '50%',
+    background: '#fff',
+    flexShrink: 0,
+    boxShadow: '0 0 0 3px rgba(255,255,255,0.3)',
   },
-  alertTitle: {
-    fontSize: 14,
-    fontWeight: 700,
-    marginBottom: 4,
-  },
-  alertMessage: {
-    fontSize: 12,
-    opacity: 0.9,
-  },
+  alertTitle: { fontSize: 13, fontWeight: 700 },
+  alertMsg:   { fontSize: 11, opacity: 0.85, marginTop: 2 },
+
+  // Header
   cmHeader: {
     background: '#fff',
-    padding: 16,
+    padding: '14px 16px',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottom: '1px solid #E8EEF8',
   },
-  cmInfo: {
-    display: 'flex',
-    gap: 12,
-    alignItems: 'center',
-  },
+  cmInfo:   { display: 'flex', gap: 12, alignItems: 'center' },
   cmAvatar: {
-    width: 48,
-    height: 48,
+    width: 44, height: 44,
     borderRadius: '50%',
     background: '#0F2557',
     color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 20,
-    fontWeight: 700,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 18, fontWeight: 700,
   },
-  cmName: {
-    fontSize: 15,
-    fontWeight: 700,
-    color: '#0F2557',
-  },
-  cmStatus: {
-    fontSize: 12,
-    color: '#16A34A',
-    fontWeight: 600,
-  },
+  cmName:   { fontSize: 14, fontWeight: 700, color: '#0F2557' },
+  cmStatus: { fontSize: 11, color: '#16A34A', fontWeight: 600, marginTop: 2 },
   refreshBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: '50%',
-    border: '1px solid #E8EEF8',
-    background: '#F8FAFC',
+    padding: '6px 14px',
+    borderRadius: 8,
+    border: '1.5px solid #D8E2F0',
+    background: '#fff',
+    color: '#0F2557',
+    fontSize: 12,
+    fontWeight: 600,
     cursor: 'pointer',
-    fontSize: 18,
   },
-  statsSummary: {
+
+  // Stats
+  statsRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
     gap: 8,
-    padding: 12,
+    padding: '12px',
     background: '#fff',
+    borderBottom: '1px solid #E8EEF8',
   },
   statBox: {
     background: '#F8FAFC',
-    padding: 12,
-    borderRadius: 8,
+    borderRadius: 10,
+    padding: '12px 8px',
     textAlign: 'center',
   },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: 700,
-    color: '#0F2557',
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 11,
-    fontWeight: 700,
-    color: '#0F2557',
-    marginBottom: 2,
-  },
-  statSubtext: {
-    fontSize: 10,
-    color: '#9EB3CC',
-  },
-  heatmapContainer: {
-    padding: 16,
+  statNum:   { fontSize: 26, fontWeight: 700, color: '#0F2557' },
+  statLabel: { fontSize: 10, fontWeight: 700, color: '#0F2557', marginTop: 4, lineHeight: 1.3 },
+  statSub:   { fontSize: 10, color: '#94A3B8', marginTop: 3 },
+
+  // Section
+  section: {
     background: '#fff',
+    padding: '16px',
     borderBottom: '1px solid #E8EEF8',
   },
-  heatmapHeader: {
-    marginBottom: 12,
-  },
-  heatmapTitle: {
-    margin: '0 0 4px 0',
-    fontSize: 14,
-    fontWeight: 700,
-    color: '#0F2557',
-  },
-  heatmapLegend: {
-    fontSize: 11,
-    color: '#6B7FA3',
-  },
-  emptyHeatmap: {
+  sectionHead:  { marginBottom: 14 },
+  sectionTitle: { fontSize: 13, fontWeight: 700, color: '#0F2557', marginBottom: 2 },
+  sectionSub:   { fontSize: 11, color: '#94A3B8' },
+  emptyState: {
     textAlign: 'center',
-    padding: '20px',
-    color: '#9EB3CC',
+    padding: '24px 0',
+    color: '#94A3B8',
     fontSize: 13,
   },
-  heatmapGrid: {
+
+  // Heatmap grid
+  heatGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
+    gridTemplateColumns: 'repeat(3, 1fr)',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 14,
   },
-  heatmapCell: {
-    padding: 8,
-    borderRadius: 6,
+  heatCell: {
+    borderRadius: 10,
+    padding: '10px 8px',
     textAlign: 'center',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
+    position: 'relative',
   },
-  cellLabel: {
-    fontSize: 10,
-    fontWeight: 700,
-    color: '#0F2557',
+  heatDot: {
+    width: 8, height: 8,
+    borderRadius: '50%',
+    margin: '0 auto 6px',
   },
-  cellCount: {
-    fontSize: 14,
-    fontWeight: 700,
-    color: '#0F2557',
-    marginTop: 2,
-  },
-  heatmapLegendBox: {
+  heatWard:  { fontSize: 10, fontWeight: 600, color: '#334155', lineHeight: 1.3, marginBottom: 4, minHeight: 28 },
+  heatCount: { fontSize: 22, fontWeight: 700 },
+  heatSub:   { fontSize: 9, color: '#94A3B8', marginTop: 2 },
+
+  // Legend
+  legendRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: 8,
+    gap: 6,
     paddingTop: 12,
-    borderTop: '1px solid #E8EEF8',
+    borderTop: '1px solid #F1F5F9',
   },
   legendItem: {
     display: 'flex',
-    gap: 6,
     alignItems: 'center',
+    gap: 6,
     fontSize: 11,
-    color: '#3A4E70',
+    color: '#475569',
   },
-  legendColor: {
-    width: 12,
-    height: 12,
-    borderRadius: 3,
+  legendDot: {
+    width: 10, height: 10,
+    borderRadius: '50%',
+    flexShrink: 0,
   },
-  quickActionsContainer: {
-    padding: 16,
-    background: '#fff',
-    borderBottom: '1px solid #E8EEF8',
-  },
-  actionTitle: {
-    margin: '0 0 12px 0',
-    fontSize: 13,
-    fontWeight: 700,
-    color: '#0F2557',
-  },
-  actionButtons: {
+
+  // Quick actions
+  actionsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, 1fr)',
     gap: 8,
+    marginTop: 12,
   },
   actionBtn: {
-    background: '#EEF2FF',
-    border: '1px solid #BFDBFE',
-    borderRadius: 8,
-    padding: 12,
+    background: '#F8FAFC',
+    border: '1.5px solid #E8EEF8',
+    borderRadius: 10,
+    padding: '14px 10px',
     cursor: 'pointer',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: 6,
-    transition: 'all 0.3s ease',
+    gap: 8,
+    transition: 'background 0.15s',
   },
-  actionIcon: {
-    fontSize: 18,
+  actionIconBox: {
+    width: 36, height: 36,
+    borderRadius: 10,
+    background: '#EEF2FF',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  actionLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: '#0F2557',
+  },
+
+  // Escalated
   escalatedSection: {
-    padding: 16,
-    background: '#FEE2E2',
-    borderTop: '1px solid #FCA5A5',
+    background: '#FEF2F2',
+    padding: '16px',
+    borderTop: '1px solid #FECACA',
   },
-  sectionTitle: {
-    margin: '0 0 12px 0',
-    fontSize: 13,
+  escalatedTitle: {
+    fontSize: 12,
     fontWeight: 700,
     color: '#DC2626',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 10,
   },
   escalatedCard: {
     background: '#fff',
-    padding: 12,
-    borderRadius: 6,
+    borderRadius: 8,
+    padding: '10px 12px',
     marginBottom: 8,
     borderLeft: '3px solid #DC2626',
   },
-  escalatedHeader: {
+  escalatedTop: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
-  },
-  escalatedType: {
-    fontSize: 12,
-    fontWeight: 700,
-    color: '#0F2557',
-  },
-  escalatedPriority: {
-    fontSize: 10,
-    fontWeight: 700,
-    background: '#DC2626',
-    color: '#fff',
-    padding: '2px 8px',
-    borderRadius: 4,
-  },
-  escalatedDetails: {
-    fontSize: 11,
-    color: '#3A4E70',
     marginBottom: 4,
   },
-  escalatedDate: {
-    fontSize: 10,
-    color: '#6B7FA3',
+  escalatedType:  { fontSize: 12, fontWeight: 700, color: '#0F2557' },
+  escalatedBadge: {
+    fontSize: 9, fontWeight: 700,
+    background: '#DC2626', color: '#fff',
+    padding: '2px 7px', borderRadius: 4,
   },
+  escalatedMeta: { fontSize: 11, color: '#475569', marginBottom: 2 },
+  escalatedWard: { fontSize: 11, color: '#6B7FA3' },
+  escalatedDate: { fontSize: 10, color: '#94A3B8', marginTop: 3 },
 };
