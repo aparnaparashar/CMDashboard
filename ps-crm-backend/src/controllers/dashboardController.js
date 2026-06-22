@@ -8,7 +8,6 @@ const getDashboardStats = async (req, res) => {
     const pending    = await Complaint.countDocuments({ status: 'Pending' });
     const inProgress = await Complaint.countDocuments({ status: 'In Progress' });
     const resolved   = await Complaint.countDocuments({ status: 'Resolved' });
-    const escalated  = await Complaint.countDocuments({ status: 'Escalated' });
 
     // Avg resolution (resolved complaints) in hours
     const resolvedComplaints = await Complaint.find({ status: 'Resolved' }).select('createdAt updatedAt');
@@ -32,6 +31,7 @@ const getDashboardStats = async (req, res) => {
     }
 
     // Escalated rate
+    const escalated = await Complaint.countDocuments({ status: 'Escalated' });
     const escalatedRate = total > 0 ? Number(((escalated / total) * 100).toFixed(1)) : 0;
 
     // Citizen satisfaction from feedback
@@ -83,7 +83,7 @@ const getDashboardStats = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        overview: { total, pending, inProgress, resolved, escalated },
+        overview: { total, pending, inProgress, resolved },
         avgResponse,
         monthlyGrowth: Number(monthlyGrowth.toFixed(1)),
         escalatedRate,

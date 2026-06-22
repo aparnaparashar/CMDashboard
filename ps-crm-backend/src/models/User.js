@@ -8,43 +8,12 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     role: {
       type: String,
-      enum: ['citizen', 'officer', 'admin', 'cm', 'supervisor'],
+      enum: ['citizen', 'officer', 'admin'],
       default: 'citizen',
     },
     phone:      { type: String },
-    area:       { type: String },
     ward:       { type: String },
     department: { type: String },  // for officers
-    activeComplaints: {
-      type: Number,
-      default: 0,
-    },
-    totalAssigned: {
-      type: Number,
-      default: 0,
-    },
-    completionRate: {
-      type: Number,
-      default: 0,
-    },
-    customerRating: {
-      type: Number,
-      default: 0,
-    },
-    avgResolutionTime: {
-      type: Number,
-      default: 0,
-    },
-    lastActive: {
-      type: Date,
-      default: null,
-    },
-    recentActivity: [
-      {
-        timestamp: { type: Date },
-        description: { type: String },
-      },
-    ],
     status: {
       type: String,
       enum: ['active', 'pending', 'rejected'],

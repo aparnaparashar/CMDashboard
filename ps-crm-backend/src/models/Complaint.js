@@ -77,23 +77,8 @@ const complaintSchema = new mongoose.Schema(
 
     // ── Location (the shared, de-duplication-relevant location) ─────────────
     location: {
-      line1:    { type: String },
-      line2:    { type: String },
       ward:     { type: String },
       locality: { type: String },   // ← NEW: needed for dedup fingerprint
-      zone:     { type: String },
-      coordinates: {
-        type: {
-          type: String,
-          enum: ['Point'],
-          default: 'Point',
-        },
-        coordinates: {
-          type: [Number],
-          index: '2dsphere',
-          default: undefined,
-        },
-      },
     },
 
     // ── All citizens who reported this exact issue ───────────────────────────
@@ -134,8 +119,6 @@ const complaintSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
-complaintSchema.index({ 'location.coordinates': '2dsphere' });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -437,55 +437,8 @@ export default function ComplaintHeatmap() {
           </div>
         </div>
       </div>
-
-      {selectedWard && (
-        <div style={S.selectedPanel}>
-          <div style={S.selectedHeader}>
-            <div>
-              <div style={S.selectedEyebrow}>Selected Location</div>
-              <h3 style={S.selectedTitle}>{selectedWard.ward}</h3>
-            </div>
-            <span style={S.selectedCount}>
-              {selectedWard.complaints?.length || 0} complaint{(selectedWard.complaints?.length || 0) === 1 ? '' : 's'}
-            </span>
-          </div>
-
-          {selectedWard.complaints?.length > 0 ? (
-            <div style={S.complaintList}>
-              {selectedWard.complaints.map((complaint) => (
-                <div key={complaint._id} style={S.complaintRow}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={S.complaintTitle}>{complaint.title}</div>
-                    <div style={S.complaintMeta}>
-                      <span>{complaint.department || complaint.category || 'Other'}</span>
-                      <span>{complaint.complaintNumber || `CMP-${String(complaint._id).slice(-8).toUpperCase()}`}</span>
-                    </div>
-                  </div>
-                  <div style={S.complaintBadges}>
-                    <span style={{ ...S.statusBadge, color: statusColor(complaint.status), background: `${statusColor(complaint.status)}18` }}>
-                      {complaint.status}
-                    </span>
-                    <span style={S.urgencyBadge}>{complaint.urgency}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={S.emptyComplaints}>No complaint details available for this location.</div>
-          )}
-        </div>
-      )}
     </div>
   );
-}
-
-function statusColor(status) {
-  switch (status) {
-    case 'Resolved': return '#16a34a';
-    case 'Escalated': return '#dc2626';
-    case 'In Progress': return '#2563eb';
-    default: return '#d97706';
-  }
 }
 
 const S = {
@@ -509,17 +462,4 @@ const S = {
   select:      { width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1.5px solid #e2e8f0', background:'#fff', fontSize:'12.5px', color:'#374151', cursor:'pointer', fontFamily:'inherit', outline:'none' },
   wardList:    { flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:'7px', paddingRight:'2px' },
   chip:        { fontSize:'11px', color:'#475569', background:'#f1f5f9', padding:'2px 7px', borderRadius:'99px' },
-  selectedPanel: { background:'#fff', border:'1px solid #e2e8f0', borderRadius:'16px', padding:'18px', boxShadow:'0 1px 3px rgba(0,0,0,0.05)' },
-  selectedHeader: { display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'12px', marginBottom:'14px' },
-  selectedEyebrow: { fontSize:'11px', fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'3px' },
-  selectedTitle: { margin:0, fontSize:'18px', fontWeight:800, color:'#0f172a' },
-  selectedCount: { background:'#eef2ff', color:'#103791', borderRadius:'999px', padding:'5px 11px', fontSize:'12px', fontWeight:700, whiteSpace:'nowrap' },
-  complaintList: { display:'grid', gap:'10px' },
-  complaintRow: { display:'flex', justifyContent:'space-between', gap:'14px', alignItems:'flex-start', border:'1px solid #e2e8f0', borderRadius:'12px', padding:'12px 14px', background:'#f8fafc' },
-  complaintTitle: { fontSize:'14px', fontWeight:750, color:'#0f172a', lineHeight:1.35, overflow:'hidden', textOverflow:'ellipsis' },
-  complaintMeta: { display:'flex', gap:'10px', flexWrap:'wrap', marginTop:'6px', fontSize:'12px', color:'#64748b' },
-  complaintBadges: { display:'flex', gap:'6px', flexWrap:'wrap', justifyContent:'flex-end', flexShrink:0 },
-  statusBadge: { borderRadius:'999px', padding:'3px 9px', fontSize:'11px', fontWeight:700 },
-  urgencyBadge: { borderRadius:'999px', padding:'3px 9px', fontSize:'11px', fontWeight:700, background:'#fff7ed', color:'#ea580c' },
-  emptyComplaints: { border:'1px dashed #cbd5e1', borderRadius:'12px', padding:'18px', color:'#64748b', textAlign:'center', fontSize:'13px' },
 };

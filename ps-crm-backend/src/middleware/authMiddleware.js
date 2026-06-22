@@ -37,12 +37,4 @@ const officerOrAdmin = (req, res, next) => {
   }
 };
 
-const adminOrSupervisor = (req, res, next) => {
-  if (req.user && (req.user.role === 'admin' || req.user.role === 'supervisor')) {
-    next();
-  } else {
-    res.status(403).json({ success: false, message: 'Access denied, admin or supervisor only' });
-  }
-};
-
-module.exports = { protect, adminOnly, officerOrAdmin, adminOrSupervisor };
+module.exports = { protect, adminOnly, officerOrAdmin };

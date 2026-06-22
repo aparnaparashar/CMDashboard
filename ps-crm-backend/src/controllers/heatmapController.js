@@ -3,24 +3,6 @@
 const Complaint = require('../models/Complaint');
 
 const URGENCY_WEIGHT = { High: 3, Medium: 2, Low: 1 };
-const DEPARTMENT_BY_CATEGORY = {
-  Sanitation: 'Sanitation & Solid Waste Management',
-  Roads: 'Roads & Infrastructure',
-  Water: 'Water Supply & Drainage',
-  Electricity: 'Street Lighting',
-  Health: 'Health Services',
-  Education: 'Education (MCD Schools)',
-  Infrastructure: 'Building & Planning',
-  Environment: 'Parks & Horticulture',
-  Finance: 'Property Tax',
-  Administration: 'Birth & Death Registration',
-  'Food Safety': 'Food Safety & Slaughterhouse',
-  Safety: 'Fire Services',
-  'Animal Welfare': 'Veterinary Services',
-  Encroachment: 'Encroachment Removal',
-  Signage: 'Advertisement & Signage',
-  Other: 'Other',
-};
 
 // ── Real Delhi localities → coordinates ───────────────────────────────────────
 // Covers locality names, common spellings, and ward numbers (Ward 1–272)
@@ -222,18 +204,6 @@ exports.getHeatmapData = async (req, res) => {
           medUrgency:  { $sum: { $cond: [{ $eq: ['$urgency', 'Medium'] }, 1, 0] } },
           lowUrgency:  { $sum: { $cond: [{ $eq: ['$urgency', 'Low'] },   1, 0] } },
           categories:  { $push: '$category' },
-          complaints: {
-            $push: {
-              _id: '$_id',
-              complaintNumber: '$complaintNumber',
-              title: '$title',
-              category: '$category',
-              department: '$department',
-              status: '$status',
-              urgency: '$urgency',
-              createdAt: '$createdAt',
-            },
-          },
         },
       },
       { $sort: { total: -1 } },
@@ -278,18 +248,6 @@ exports.getHeatmapData = async (req, res) => {
         highUrgency:    ward.highUrgency,
         medUrgency:     ward.medUrgency,
         lowUrgency:     ward.lowUrgency,
-        complaints:     (ward.complaints || [])
-          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-          .map((complaint) => ({
-            _id: complaint._id,
-            complaintNumber: complaint.complaintNumber,
-            title: complaint.title || 'Untitled complaint',
-            category: complaint.category || 'Other',
-            department: complaint.department || DEPARTMENT_BY_CATEGORY[complaint.category] || complaint.category || 'Other',
-            status: complaint.status,
-            urgency: complaint.urgency,
-            createdAt: complaint.createdAt,
-          })),
         weightedScore,
         topCategory,
         resolutionRate: resRate,
